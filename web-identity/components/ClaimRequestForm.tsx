@@ -130,6 +130,32 @@ export default function ClaimRequestForm({ userAddress, onSuccess }: ClaimReques
     }
   };
 
+  const signMessage = async (): Promise<{ signedMessage: string; signature: string }> => {
+    try {
+      if (typeof window === 'undefined' || !window.ethereum) {
+        throw new Error('MetaMask not available');
+      }
+
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      
+      // Create message with requester address + timestamp
+      const timestamp = new Date().toISOString();
+      const messageToSign = `Claim Request Verification\n\nRequester: ${userAddress}\nTimestamp: ${timestamp}\n\nI hereby request verification of my claim from the selected trusted issuer.`;
+      
+      // Request signature from MetaMask
+      const signature = await signer.signMessage(messageToSign);
+      
+      return {
+        signedMessage: messageToSign,
+        signature: signature
+      };
+    } catch (err) {
+      console.error('Error signing message:', err);
+      throw new Error('Failed to sign message. Please approve the signature request in MetaMask.');
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -142,7 +168,10 @@ export default function ClaimRequestForm({ userAddress, onSuccess }: ClaimReques
       setLoading(true);
       setError(null);
 
-      // Upload file if exists
+      // Step 1: Sign the message with MetaMask
+      const { signedMessage, signature } = await signMessage();
+
+      // Step 2: Upload file if exists
       let documentData: {
         fileId: string;
         filename: string;
@@ -153,7 +182,7 @@ export default function ClaimRequestForm({ userAddress, onSuccess }: ClaimReques
         documentData = await uploadFile();
       }
 
-      // Create claim request
+      // Step 3: Create claim request with signature
       const requestBody = {
         requesterAddress: userAddress,
         issuerAddress: selectedIssuer,
@@ -163,6 +192,8 @@ export default function ClaimRequestForm({ userAddress, onSuccess }: ClaimReques
         documentName: documentData?.filename,
         documentContentType: documentData?.contentType,
         documentSize: documentData?.size,
+        signedMessage,
+        signature,
       };
 
       const response = await fetch('/api/claim-requests', {

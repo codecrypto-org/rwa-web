@@ -165,6 +165,11 @@ export default function IssuerRequestsList({ issuerAddress, onSelectRequest }: I
                         📎 Document attached
                       </span>
                     )}
+                    {request.signature && (
+                      <span className="rounded-full bg-green-100 px-2 py-1 text-xs text-green-700 dark:bg-green-900 dark:text-green-300">
+                        ✍️ Signed
+                      </span>
+                    )}
                   </div>
                   
                   <div className="space-y-1">

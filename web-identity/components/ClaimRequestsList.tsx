@@ -8,17 +8,21 @@
 
 import { useState, useEffect } from 'react';
 import { ClaimRequest } from '@/types/claim-request';
+import RequestDetailModal from './RequestDetailModal';
 
 interface ClaimRequestsListProps {
   userAddress: string;
   refreshTrigger: number;
+  identityAddress: string;
+  onClaimAdded?: () => void;
 }
 
-export default function ClaimRequestsList({ userAddress, refreshTrigger }: ClaimRequestsListProps) {
+export default function ClaimRequestsList({ userAddress, refreshTrigger, identityAddress, onClaimAdded }: ClaimRequestsListProps) {
   const [requests, setRequests] = useState<ClaimRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  const [selectedRequest, setSelectedRequest] = useState<ClaimRequest | null>(null);
 
   useEffect(() => {
     loadRequests();
@@ -138,7 +142,8 @@ export default function ClaimRequestsList({ userAddress, refreshTrigger }: Claim
           {requests.map((request, index) => (
             <div
               key={request._id || index}
-              className="rounded-lg border border-gray-200 bg-gray-50 p-4 transition-all hover:border-blue-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-900"
+              onClick={() => setSelectedRequest(request)}
+              className="cursor-pointer rounded-lg border border-gray-200 bg-gray-50 p-4 transition-all hover:border-blue-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-900"
             >
               <div className="mb-3 flex items-start justify-between">
                 <div className="flex-1">
@@ -189,6 +194,22 @@ export default function ClaimRequestsList({ userAddress, refreshTrigger }: Claim
                         </a>
                       </div>
                     )}
+                    
+                    {request.signature && (
+                      <div className="mt-2">
+                        <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                          ✍️ Digitally signed by you
+                        </p>
+                      </div>
+                    )}
+                    
+                    {request.issuerSignature && request.status !== 'pending' && (
+                      <div className="mt-2">
+                        <p className="text-xs font-medium text-green-600 dark:text-green-400">
+                          ✅ Reviewed & signed by issuer
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -204,6 +225,20 @@ export default function ClaimRequestsList({ userAddress, refreshTrigger }: Claim
             </div>
           ))}
         </div>
+      )}
+
+      {/* Request Detail Modal */}
+      {selectedRequest && (
+        <RequestDetailModal
+          request={selectedRequest}
+          onClose={() => setSelectedRequest(null)}
+          identityAddress={identityAddress}
+          onClaimAdded={() => {
+            setSelectedRequest(null);
+            loadRequests();
+            if (onClaimAdded) onClaimAdded();
+          }}
+        />
       )}
     </div>
   );

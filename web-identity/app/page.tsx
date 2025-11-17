@@ -8,6 +8,7 @@ import {
 } from "@/lib/contracts";
 import ClaimRequestForm from "@/components/ClaimRequestForm";
 import ClaimRequestsList from "@/components/ClaimRequestsList";
+import { CLAIM_TOPIC_NAMES } from "@/lib/identity-claims";
 
 export default function Home() {
   const { 
@@ -25,6 +26,7 @@ export default function Home() {
   const [error, setError] = useState<string>("");
   const [success, setSuccess] = useState<string>("");
   const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
+  const [identityClaims, setIdentityClaims] = useState<{ topic: bigint; issuer: string }[]>([]);
 
   const checkRegistrationStatus = useCallback(async (address: string) => {
     if (!provider) return;
@@ -86,6 +88,7 @@ export default function Home() {
       // Clear state when disconnected
       setIsRegistered(false);
       setIdentityAddress("");
+      setIdentityClaims([]);
     }
   }, [account, provider, checkRegistrationStatus]);
 
@@ -263,6 +266,83 @@ export default function Home() {
     setRefreshTrigger(prev => prev + 1);
   };
 
+  const handleClaimAdded = () => {
+    loadIdentityClaims();
+  };
+
+  const loadIdentityClaims = useCallback(async () => {
+    if (!identityAddress || identityAddress === '0x0000000000000000000000000000000000000000' || !provider) {
+      setIdentityClaims([]);
+      return;
+    }
+
+    try {
+      console.log('📋 Loading claims from identity contract:', identityAddress);
+
+      // Dynamic import of ethers
+      const { ethers } = await import('ethers');
+
+      // Identity contract ABI for reading claims
+      const identityABI = [
+        {
+          "type": "function",
+          "name": "getClaimIssuersForTopic",
+          "inputs": [{ "name": "_topic", "type": "uint256" }],
+          "outputs": [{ "name": "", "type": "address[]" }],
+          "stateMutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "claimExists",
+          "inputs": [
+            { "name": "_topic", "type": "uint256" },
+            { "name": "_issuer", "type": "address" }
+          ],
+          "outputs": [{ "name": "", "type": "bool" }],
+          "stateMutability": "view"
+        }
+      ];
+
+      const identityContract = new ethers.Contract(
+        identityAddress,
+        identityABI,
+        provider
+      );
+
+      // Check common claim topics (1, 7, 9)
+      const topicsToCheck = [1n, 7n, 9n];
+      const claims: { topic: bigint; issuer: string }[] = [];
+
+      for (const topic of topicsToCheck) {
+        try {
+          const issuers = await identityContract.getClaimIssuersForTopic(topic);
+          
+          for (const issuer of issuers) {
+            const exists = await identityContract.claimExists(topic, issuer);
+            if (exists) {
+              claims.push({ topic, issuer });
+            }
+          }
+        } catch (err) {
+          console.log(`No claims for topic ${topic}`);
+        }
+      }
+
+      console.log('✅ Claims loaded:', claims);
+      setIdentityClaims(claims);
+    } catch (err) {
+      console.error('Error loading claims:', err);
+      setIdentityClaims([]);
+    }
+  }, [identityAddress, provider]);
+
+  // Load claims when identity address changes
+  useEffect(() => {
+    if (identityAddress && identityAddress !== '0x0000000000000000000000000000000000000000' && provider) {
+      loadIdentityClaims();
+    }
+  }, [identityAddress, provider, loadIdentityClaims]);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 font-sans dark:from-gray-900 dark:to-gray-800">
       <div className="container mx-auto px-4 py-8">
@@ -321,6 +401,40 @@ export default function Home() {
                         <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Identity Contract:</p>
                         <p className="mt-1 break-all font-mono text-xs text-gray-900 dark:text-white">
                           {identityAddress}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Claims in Identity */}
+                    {identityClaims.length > 0 && (
+                      <div>
+                        <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                          Claims in Identity:
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {identityClaims.map((claim, idx) => {
+                            const topicNum = Number(claim.topic);
+                            const claimName = CLAIM_TOPIC_NAMES[topicNum] || `Claim ${topicNum}`;
+                            return (
+                              <span
+                                key={idx}
+                                className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-3 py-1 text-xs font-semibold text-purple-800 dark:bg-purple-900 dark:text-purple-200"
+                                title={`Issuer: ${claim.issuer}\nTopic: ${topicNum}`}
+                              >
+                                ✓ {claimName}
+                              </span>
+                            );
+                          })}
+                        </div>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          {identityClaims.length} claim{identityClaims.length !== 1 ? 's' : ''} loaded in your identity contract
+                        </p>
+                      </div>
+                    )}
+                    {identityAddress && identityAddress !== '0x0000000000000000000000000000000000000000' && identityClaims.length === 0 && (
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          No claims found in your identity contract. Request claims from trusted issuers below.
                         </p>
                       </div>
                     )}
@@ -408,6 +522,8 @@ export default function Home() {
                 <ClaimRequestsList 
                   userAddress={account}
                   refreshTrigger={refreshTrigger}
+                  identityAddress={identityAddress}
+                  onClaimAdded={handleClaimAdded}
                 />
               </div>
             </div>

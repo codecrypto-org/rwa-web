@@ -9,8 +9,8 @@
  * Owner: 0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38
  */
 
-export const TOKEN_CLONE_FACTORY_ADDRESS = "0x5b73C5498c1E3b4dbA84de0F1833c4a029d90519" as const;
-export const TOKEN_IMPLEMENTATION_ADDRESS = "0xC7f2Cf4845C6db0e1a1e91ED41Bcd0FcC1b0E141" as const;
+export const TOKEN_CLONE_FACTORY_ADDRESS = "0xcf7ed3acca5a467e9e704c703e8d87f634fb0fc9" as const;
+export const TOKEN_IMPLEMENTATION_ADDRESS = "" as const;
 
 export const TOKEN_CLONE_FACTORY_ABI = [
   {

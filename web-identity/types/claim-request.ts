@@ -13,8 +13,16 @@ export interface ClaimRequest {
   documentContentType?: string;
   documentSize?: number;
   status: 'pending' | 'approved' | 'rejected';
+  // Digital signature fields (requester)
+  signedMessage: string;      // Message that was signed: "requester + date"
+  signature: string;           // Cryptographic signature from MetaMask
   createdAt: Date;
   updatedAt: Date;
+  reviewedAt?: Date;
+  reviewNote?: string;
+  // Digital signature fields (issuer review)
+  issuerSignedMessage?: string;    // Message signed by issuer when approving/rejecting
+  issuerSignature?: string;         // Issuer's cryptographic signature
 }
 
 export interface CreateClaimRequestDto {
@@ -26,5 +34,7 @@ export interface CreateClaimRequestDto {
   documentName?: string;
   documentContentType?: string;
   documentSize?: number;
+  signedMessage: string;
+  signature: string;
 }
 

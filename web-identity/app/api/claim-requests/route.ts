@@ -60,12 +60,12 @@ export async function POST(request: NextRequest) {
     const body: CreateClaimRequestDto = await request.json();
     
     // Validate required fields
-    if (!body.requesterAddress || !body.issuerAddress || !body.claimTopic) {
+    if (!body.requesterAddress || !body.issuerAddress || !body.claimTopic || !body.signedMessage || !body.signature) {
       return NextResponse.json(
         {
           success: false,
           error: 'Missing required fields',
-          message: 'requesterAddress, issuerAddress, and claimTopic are required',
+          message: 'requesterAddress, issuerAddress, claimTopic, signedMessage, and signature are required',
         },
         { status: 400 }
       );
@@ -84,6 +84,8 @@ export async function POST(request: NextRequest) {
       documentName: body.documentName,
       documentContentType: body.documentContentType,
       documentSize: body.documentSize,
+      signedMessage: body.signedMessage,
+      signature: body.signature,
       status: 'pending',
       createdAt: new Date(),
       updatedAt: new Date(),

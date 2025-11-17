@@ -14,12 +14,12 @@ export async function POST(request: NextRequest) {
     const body: UpdateRequestStatusDto = await request.json();
     
     // Validate required fields
-    if (!body.requestId || !body.status) {
+    if (!body.requestId || !body.status || !body.issuerSignedMessage || !body.issuerSignature) {
       return NextResponse.json(
         {
           success: false,
           error: 'Missing required fields',
-          message: 'requestId and status are required',
+          message: 'requestId, status, issuerSignedMessage, and issuerSignature are required',
         },
         { status: 400 }
       );
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     const db = await getDatabase();
     const collection = db.collection('claim_requests');
     
-    // Update the request
+    // Update the request with issuer signature
     const result = await collection.updateOne(
       { _id: new ObjectId(body.requestId) },
       {
@@ -59,6 +59,8 @@ export async function POST(request: NextRequest) {
           status: body.status,
           reviewedAt: new Date(),
           reviewNote: body.reviewNote || '',
+          issuerSignedMessage: body.issuerSignedMessage,
+          issuerSignature: body.issuerSignature,
           updatedAt: new Date(),
         }
       }

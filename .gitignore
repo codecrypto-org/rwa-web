@@ -1,0 +1,35 @@
+# Logs
+logs/
+*.log
+
+# PIDs
+.pids/
+*.pid
+
+# Node modules
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Environment
+.env
+.env.local
+.env*.local
+
+# OS
+.DS_Store
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# Temporary files
+tmp/
+temp/
+

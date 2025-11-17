@@ -1,7 +1,7 @@
 /**
- * Request Detail Modal Component
+ * Request Detail Modal Component (for users to view their requests)
  * 
- * Shows detailed information about a request and allows approval/rejection
+ * Shows detailed information about a claim request including signatures
  */
 
 'use client';
@@ -12,108 +12,127 @@ import { ClaimRequest } from '@/types/claim-request';
 interface RequestDetailModalProps {
   request: ClaimRequest;
   onClose: () => void;
-  onUpdate: () => void;
-  issuerAddress: string;
+  identityAddress: string;
+  onClaimAdded?: () => void;
 }
 
-export default function RequestDetailModal({ request, onClose, onUpdate, issuerAddress }: RequestDetailModalProps) {
-  const [loading, setLoading] = useState(false);
-  const [reviewNote, setReviewNote] = useState('');
+export default function RequestDetailModal({ request, onClose, identityAddress, onClaimAdded }: RequestDetailModalProps) {
+  const [addingClaim, setAddingClaim] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [claimAdded, setClaimAdded] = useState(false);
 
   const formatDate = (date: Date | string) => {
     return new Date(date).toLocaleString();
   };
 
-  const signReviewDecision = async (status: 'approved' | 'rejected'): Promise<{ signedMessage: string; signature: string }> => {
+  const addClaimToIdentity = async () => {
+    if (!identityAddress || identityAddress === '0x0000000000000000000000000000000000000000') {
+      setError('No identity contract found');
+      return;
+    }
+
+    if (request.status !== 'approved') {
+      setError('Only approved claims can be added to your identity');
+      return;
+    }
+
     try {
+      setAddingClaim(true);
+      setError(null);
+
+      console.log('🔐 Adding claim to identity contract...');
+      console.log('Identity address:', identityAddress);
+      console.log('Claim topic:', request.claimTopic);
+      console.log('Issuer:', request.issuerAddress);
+
       if (typeof window === 'undefined' || !window.ethereum) {
         throw new Error('MetaMask not available');
       }
 
+      // Dynamic import of ethers
       const { ethers } = await import('ethers');
+
       const provider = new ethers.BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
+
+      // Identity contract ABI for addClaim
+      const identityABI = [
+        {
+          "type": "function",
+          "name": "addClaim",
+          "inputs": [
+            { "name": "_topic", "type": "uint256" },
+            { "name": "_scheme", "type": "uint256" },
+            { "name": "_issuer", "type": "address" },
+            { "name": "_signature", "type": "bytes" },
+            { "name": "_data", "type": "bytes" },
+            { "name": "_uri", "type": "string" }
+          ],
+          "outputs": [{ "name": "", "type": "bytes32" }],
+          "stateMutability": "nonpayable"
+        }
+      ];
+
+      const identityContract = new ethers.Contract(
+        identityAddress,
+        identityABI,
+        signer
+      );
+
+      // Prepare claim data
+      const topic = BigInt(request.claimTopic);
+      const scheme = 1n; // ECDSA signature scheme
+      const issuer = request.issuerAddress;
       
-      // Create message with review decision
-      const timestamp = new Date().toISOString();
-      const messageToSign = `Claim Request Review Decision
-
-Request ID: ${request._id}
-Issuer: ${issuerAddress}
-Requester: ${request.requesterAddress}
-Claim Topic: ${request.claimTopic}
-Decision: ${status.toUpperCase()}
-Timestamp: ${timestamp}
-Review Note: ${reviewNote || 'N/A'}
-
-I hereby ${status === 'approved' ? 'APPROVE' : 'REJECT'} this claim request with my digital signature.`;
+      // Use issuer's signature as the signature bytes
+      const signatureBytes = request.issuerSignature || '0x';
       
-      console.log('📝 Message to sign:', messageToSign);
+      // Encode additional data (message, timestamps, etc.)
+      const claimData = ethers.AbiCoder.defaultAbiCoder().encode(
+        ['string', 'string', 'uint256'],
+        [
+          request.message || '',
+          request.issuerSignedMessage || '',
+          Math.floor(new Date(request.reviewedAt || request.updatedAt).getTime() / 1000)
+        ]
+      );
       
-      // Request signature from MetaMask
-      const signature = await signer.signMessage(messageToSign);
-      
-      console.log('✅ Signature obtained:', signature);
-      
-      return {
-        signedMessage: messageToSign,
-        signature: signature
-      };
-    } catch (err) {
-      console.error('Error signing review decision:', err);
-      throw new Error('Failed to sign decision. Please approve the signature request in MetaMask.');
-    }
-  };
+      const uri = request.documentFileId 
+        ? `/api/download/${request.documentFileId}`
+        : '';
 
-  const handleAction = async (status: 'approved' | 'rejected') => {
-    // Verify issuer address matches
-    if (issuerAddress.toLowerCase() !== request.issuerAddress.toLowerCase()) {
-      setError('You are not authorized to review this request');
-      return;
-    }
-
-    if (request.status !== 'pending') {
-      setError('This request has already been reviewed');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      // Sign the review decision
-      console.log('🔐 Requesting signature from issuer...');
-      const { signedMessage, signature } = await signReviewDecision(status);
-
-      const response = await fetch('/api/update-request', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          requestId: request._id,
-          status,
-          reviewNote,
-          issuerSignedMessage: signedMessage,
-          issuerSignature: signature,
-        }),
+      console.log('📝 Calling addClaim with:', {
+        topic: topic.toString(),
+        scheme: scheme.toString(),
+        issuer,
+        signature: signatureBytes.substring(0, 20) + '...',
+        uri
       });
 
-      const result = await response.json();
+      const tx = await identityContract.addClaim(
+        topic,
+        scheme,
+        issuer,
+        signatureBytes,
+        claimData,
+        uri
+      );
 
-      if (!result.success) {
-        throw new Error(result.message || 'Failed to update request');
+      console.log('⏳ Transaction sent:', tx.hash);
+      await tx.wait();
+      console.log('✅ Claim added to identity!');
+
+      setClaimAdded(true);
+      alert('Claim added to your identity successfully!\n\n✓ You can now use this claim for token investments');
+      
+      if (onClaimAdded) {
+        onClaimAdded();
       }
-
-      alert(`Request ${status} successfully!\n\n✓ Decision cryptographically signed`);
-      onUpdate();
-      onClose();
     } catch (err) {
-      console.error('Error updating request:', err);
-      setError(err instanceof Error ? err.message : 'Failed to update request');
+      console.error('Error adding claim to identity:', err);
+      setError(err instanceof Error ? err.message : 'Failed to add claim to identity');
     } finally {
-      setLoading(false);
+      setAddingClaim(false);
     }
   };
 
@@ -133,7 +152,7 @@ I hereby ${status === 'approved' ? 'APPROVE' : 'REJECT'} this claim request with
         {/* Header */}
         <div className="mb-6 flex items-center justify-between">
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-            Claim Request Details
+            Request Details
           </h2>
           <button
             onClick={onClose}
@@ -152,20 +171,10 @@ I hereby ${status === 'approved' ? 'APPROVE' : 'REJECT'} this claim request with
 
         {/* Request Information */}
         <div className="space-y-4">
-          {/* Requester Address */}
-          <div className="rounded-lg bg-gray-50 p-4 dark:bg-gray-900">
-            <p className="mb-1 text-sm font-medium text-gray-500 dark:text-gray-400">
-              Requester Address
-            </p>
-            <code className="block break-all text-sm text-gray-900 dark:text-white">
-              {request.requesterAddress}
-            </code>
-          </div>
-
           {/* Issuer Address */}
           <div className="rounded-lg bg-gray-50 p-4 dark:bg-gray-900">
             <p className="mb-1 text-sm font-medium text-gray-500 dark:text-gray-400">
-              Issuer Address (You)
+              Issuer Address
             </p>
             <code className="block break-all text-sm text-gray-900 dark:text-white">
               {request.issuerAddress}
@@ -186,7 +195,7 @@ I hereby ${status === 'approved' ? 'APPROVE' : 'REJECT'} this claim request with
           {request.message && (
             <div className="rounded-lg bg-gray-50 p-4 dark:bg-gray-900">
               <p className="mb-2 text-sm font-medium text-gray-500 dark:text-gray-400">
-                Message
+                Your Message
               </p>
               <p className="text-sm text-gray-900 dark:text-white">
                 {request.message}
@@ -216,11 +225,11 @@ I hereby ${status === 'approved' ? 'APPROVE' : 'REJECT'} this claim request with
             </div>
           )}
 
-          {/* Digital Signature */}
+          {/* Your Digital Signature */}
           {request.signedMessage && request.signature && (
             <div className="rounded-lg border-2 border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-900/20">
               <p className="mb-2 flex items-center gap-2 text-sm font-medium text-green-900 dark:text-green-300">
-                ✍️ Digital Signature (Verified by Wallet)
+                ✍️ Your Digital Signature
               </p>
               
               <div className="space-y-3">
@@ -239,7 +248,7 @@ I hereby ${status === 'approved' ? 'APPROVE' : 'REJECT'} this claim request with
                 {/* Signature */}
                 <div>
                   <p className="mb-1 text-xs font-semibold text-green-800 dark:text-green-400">
-                    Cryptographic Signature:
+                    Your Cryptographic Signature:
                   </p>
                   <code className="block break-all rounded bg-white p-2 text-xs text-gray-700 dark:bg-gray-900 dark:text-gray-300">
                     {request.signature}
@@ -248,30 +257,16 @@ I hereby ${status === 'approved' ? 'APPROVE' : 'REJECT'} this claim request with
               </div>
               
               <p className="mt-2 text-xs text-green-700 dark:text-green-500">
-                ✓ This request has been cryptographically signed by the requester's wallet, ensuring authenticity and non-repudiation.
+                ✓ You cryptographically signed this request, proving authenticity.
               </p>
             </div>
           )}
 
-          {/* Timestamps */}
-          <div className="rounded-lg bg-gray-50 p-4 dark:bg-gray-900">
-            <p className="mb-2 text-sm font-medium text-gray-500 dark:text-gray-400">
-              Timeline
-            </p>
-            <div className="space-y-1 text-sm text-gray-700 dark:text-gray-300">
-              <p>Created: {formatDate(request.createdAt)}</p>
-              <p>Updated: {formatDate(request.updatedAt)}</p>
-              {request.reviewedAt && (
-                <p>Reviewed: {formatDate(request.reviewedAt)}</p>
-              )}
-            </div>
-          </div>
-
-          {/* Review Note (if already reviewed) */}
+          {/* Review Note (if reviewed) */}
           {request.reviewNote && (
             <div className="rounded-lg bg-gray-50 p-4 dark:bg-gray-900">
               <p className="mb-2 text-sm font-medium text-gray-500 dark:text-gray-400">
-                Review Note
+                Issuer's Review Note
               </p>
               <p className="text-sm text-gray-900 dark:text-white">
                 {request.reviewNote}
@@ -279,18 +274,18 @@ I hereby ${status === 'approved' ? 'APPROVE' : 'REJECT'} this claim request with
             </div>
           )}
 
-          {/* Issuer Digital Signature (if already reviewed) */}
+          {/* Issuer Digital Signature (if reviewed) */}
           {request.issuerSignedMessage && request.issuerSignature && (
             <div className="rounded-lg border-2 border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20">
               <p className="mb-2 flex items-center gap-2 text-sm font-medium text-blue-900 dark:text-blue-300">
-                ✍️ Issuer Digital Signature
+                ✍️ Issuer's Digital Signature
               </p>
               
               <div className="space-y-3">
                 {/* Signed Decision Message */}
                 <div>
                   <p className="mb-1 text-xs font-semibold text-blue-800 dark:text-blue-400">
-                    Signed Review Decision:
+                    Issuer's Signed Decision:
                   </p>
                   <div className="rounded bg-white p-2 dark:bg-gray-900">
                     <pre className="whitespace-pre-wrap break-words text-xs text-gray-700 dark:text-gray-300">
@@ -311,10 +306,24 @@ I hereby ${status === 'approved' ? 'APPROVE' : 'REJECT'} this claim request with
               </div>
               
               <p className="mt-2 text-xs text-blue-700 dark:text-blue-500">
-                ✓ The issuer has cryptographically signed this decision, providing a permanent, verifiable record of the {request.status} action.
+                ✓ The issuer has cryptographically signed their decision of {request.status}, providing a permanent, verifiable record.
               </p>
             </div>
           )}
+
+          {/* Timestamps */}
+          <div className="rounded-lg bg-gray-50 p-4 dark:bg-gray-900">
+            <p className="mb-2 text-sm font-medium text-gray-500 dark:text-gray-400">
+              Timeline
+            </p>
+            <div className="space-y-1 text-sm text-gray-700 dark:text-gray-300">
+              <p>Created: {formatDate(request.createdAt)}</p>
+              <p>Updated: {formatDate(request.updatedAt)}</p>
+              {request.reviewedAt && (
+                <p>Reviewed: {formatDate(request.reviewedAt)}</p>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Error Message */}
@@ -324,58 +333,47 @@ I hereby ${status === 'approved' ? 'APPROVE' : 'REJECT'} this claim request with
           </div>
         )}
 
-        {/* Actions (only for pending requests) */}
-        {request.status === 'pending' && (
-          <div className="mt-6 space-y-4 border-t border-gray-200 pt-6 dark:border-gray-700">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-              Review This Request
-            </h3>
-            
-            {/* Review Note Input */}
-            <div>
-              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Review Note (Optional)
-              </label>
-              <textarea
-                value={reviewNote}
-                onChange={(e) => setReviewNote(e.target.value)}
-                rows={3}
-                placeholder="Add any notes or comments about your decision..."
-                className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-              />
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex gap-3">
-              <button
-                onClick={() => handleAction('approved')}
-                disabled={loading}
-                className="flex-1 rounded-lg bg-green-600 px-6 py-3 font-semibold text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {loading ? 'Processing...' : '✓ Approve'}
-              </button>
-              <button
-                onClick={() => handleAction('rejected')}
-                disabled={loading}
-                className="flex-1 rounded-lg bg-red-600 px-6 py-3 font-semibold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {loading ? 'Processing...' : '✕ Reject'}
-              </button>
-            </div>
+        {/* Success Message */}
+        {claimAdded && (
+          <div className="mt-4 rounded-lg border-2 border-green-300 bg-green-100 p-4 dark:border-green-700 dark:bg-green-900/30">
+            <p className="text-sm font-semibold text-green-900 dark:text-green-300">
+              ✅ Claim successfully added to your identity!
+            </p>
+            <p className="mt-1 text-xs text-green-800 dark:text-green-400">
+              The claim is now part of your on-chain identity and can be used for compliance verification.
+            </p>
           </div>
         )}
 
-        {/* Close Button (for already reviewed requests) */}
-        {request.status !== 'pending' && (
-          <div className="mt-6 border-t border-gray-200 pt-6 dark:border-gray-700">
-            <button
-              onClick={onClose}
-              className="w-full rounded-lg bg-gray-600 px-6 py-3 font-semibold text-white transition-colors hover:bg-gray-700"
-            >
-              Close
-            </button>
-          </div>
-        )}
+        {/* Action Buttons */}
+        <div className="mt-6 space-y-3 border-t border-gray-200 pt-6 dark:border-gray-700">
+          {/* Add to Identity Button (only for approved claims) */}
+          {request.status === 'approved' && !claimAdded && (
+            <div className="rounded-lg border-2 border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-900/20">
+              <h4 className="mb-2 text-sm font-semibold text-green-900 dark:text-green-300">
+                ✅ Claim Approved!
+              </h4>
+              <p className="mb-3 text-xs text-green-800 dark:text-green-400">
+                This claim has been approved by the issuer. You can now add it to your identity contract to use it for token investments and compliance verification.
+              </p>
+              <button
+                onClick={addClaimToIdentity}
+                disabled={addingClaim}
+                className="w-full rounded-lg bg-green-600 px-6 py-3 font-semibold text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {addingClaim ? 'Adding to Identity...' : '⬆️ Add Claim to Identity Contract'}
+              </button>
+            </div>
+          )}
+          
+          {/* Close Button */}
+          <button
+            onClick={onClose}
+            className="w-full rounded-lg bg-gray-600 px-6 py-3 font-semibold text-white transition-colors hover:bg-gray-700"
+          >
+            Close
+          </button>
+        </div>
       </div>
     </div>
   );
